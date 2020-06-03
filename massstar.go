@@ -5,8 +5,6 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
-	"regexp"
-	"sync"
 	"syscall"
 
 	"github.com/bwmarrin/discordgo"
@@ -27,38 +25,43 @@ type ClientObj struct {
 }
 
 var clients []ClientObj
-var processedMessages = map[string]bool{}
-var processedMessagesLock sync.Mutex
-var starRegex *regexp.Regexp
 
-func onMessageCreated(s *discordgo.Session, m *discordgo.MessageCreate) {
-	processedMessagesLock.Lock()
-	defer processedMessagesLock.Unlock()
-
-	channel, _ := s.Channel(m.ChannelID)
+func onMessageReactionAdd(s *discordgo.Session, m *discordgo.MessageReactionAdd) {
 	currentUser, _ := s.User("@me")
-	log.Info().
-		Str("channel", channel.Name).
-		Str("content", m.Content).
+	log.Debug().
 		Str("bot", currentUser.String()).
-		Str("message_id", m.ID).
-		Bool("already_seen", processedMessages[m.ID]).
-		Msg("Message created")
+		Str("message_id", m.MessageID).
+		Str("emoji", m.Emoji.Name).
+		Msg("Reaction added")
 
-	if processedMessages[m.ID] {
-		return
+	if m.Emoji.Name == "🔺" {
+		log.Info().
+			Str("bot", currentUser.String()).
+			Str("message_id", m.MessageID).
+			Msg("Got trigger emoji")
+		s.MessageReactionAdd(m.ChannelID, m.MessageID, "⭐")
 	}
-	processedMessages[m.ID] = true
+}
 
-	// match := starRegex.FindStringSubmatch(m.Content)
-	// if len(match) == 1 {
+func onMessageReactionRemove(s *discordgo.Session, m *discordgo.MessageReactionRemove) {
+	currentUser, _ := s.User("@me")
+	log.Debug().
+		Str("bot", currentUser.String()).
+		Str("message_id", m.MessageID).
+		Str("emoji", m.Emoji.Name).
+		Msg("Reaction removed")
 
-	// }
+	if m.Emoji.Name == "🔺" {
+		log.Info().
+			Str("bot", currentUser.String()).
+			Str("message_id", m.MessageID).
+			Msg("Removed trigger emoji")
+		s.MessageReactionRemove(m.ChannelID, m.MessageID, "⭐", "@me")
+	}
 }
 
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
-	starRegex = regexp.MustCompile("^\\.s (\\d+)$")
 
 	var tokens []BotToken
 
@@ -73,7 +76,8 @@ func main() {
 	for _, token := range tokens {
 		log.Debug().Str("name", token.Name).Msg("Initializing client")
 		client, _ := discordgo.New("Bot " + token.Token)
-		client.AddHandler(onMessageCreated)
+		client.AddHandler(onMessageReactionAdd)
+		client.AddHandler(onMessageReactionRemove)
 		_ = client.Open()
 		clients = append(clients, ClientObj{client, token})
 	}
