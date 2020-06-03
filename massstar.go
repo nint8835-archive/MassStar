@@ -5,6 +5,8 @@ import (
 	"io/ioutil"
 	"os"
 	"os/signal"
+	"regexp"
+	"sync"
 	"syscall"
 
 	"github.com/bwmarrin/discordgo"
@@ -24,8 +26,39 @@ type ClientObj struct {
 	Token  BotToken
 }
 
+var clients []ClientObj
+var processedMessages = map[string]bool{}
+var processedMessagesLock sync.Mutex
+var starRegex *regexp.Regexp
+
+func onMessageCreated(s *discordgo.Session, m *discordgo.MessageCreate) {
+	processedMessagesLock.Lock()
+	defer processedMessagesLock.Unlock()
+
+	channel, _ := s.Channel(m.ChannelID)
+	currentUser, _ := s.User("@me")
+	log.Info().
+		Str("channel", channel.Name).
+		Str("content", m.Content).
+		Str("bot", currentUser.String()).
+		Str("message_id", m.ID).
+		Bool("already_seen", processedMessages[m.ID]).
+		Msg("Message created")
+
+	if processedMessages[m.ID] {
+		return
+	}
+	processedMessages[m.ID] = true
+
+	// match := starRegex.FindStringSubmatch(m.Content)
+	// if len(match) == 1 {
+
+	// }
+}
+
 func main() {
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	starRegex = regexp.MustCompile("^\\.s (\\d+)$")
 
 	var tokens []BotToken
 
@@ -36,12 +69,11 @@ func main() {
 	json.Unmarshal(tokenBytes, &tokens)
 	log.Debug().Interface("tokens", tokens).Msg("Tokens loaded")
 
-	var clients []ClientObj
-
 	log.Debug().Msg("Initializing clients")
 	for _, token := range tokens {
 		log.Debug().Str("name", token.Name).Msg("Initializing client")
 		client, _ := discordgo.New("Bot " + token.Token)
+		client.AddHandler(onMessageCreated)
 		_ = client.Open()
 		clients = append(clients, ClientObj{client, token})
 	}
